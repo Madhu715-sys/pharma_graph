@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PharmGraph - Clinical Knowledge Graph Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    #graph-network { height: 580px; background: #0f172a; border-radius: 0.75rem; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center pb-5 border-b border-slate-800 gap-4 mb-6">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="bg-teal-500 text-slate-950 font-bold px-2 py-0.5 rounded text-xs">MED-GRAPH</span>
+          <h1 class="text-2xl font-bold text-teal-400">PharmGraph Clinical Pathfinder</h1>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">Multi-Hop Drug-Drug Interaction & Prescription Safety Engine on CognoDB</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="triggerReseed()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-lg border border-slate-700 transition">
+          Reseed Database
+        </button>
+        <button onclick="loadGraph()" class="bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs px-4 py-2 rounded-lg transition shadow">
+          Refresh Graph
+        </button>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-slate-200">Interactive Knowledge Graph</h2>
+          <div class="flex gap-2 text-xs">
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span> Patient</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Drug</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Disease</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Ingredient</span>
+          </div>
+        </div>
+        <div id="graph-network" class="flex-grow"></div>
+      </div>
+
+      <div class="lg:col-span-5 space-y-6">
+        <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow">
+          <label class="block text-xs font-medium text-slate-400 mb-1">Select Patient Profile</label>
+          <select id="patient-select" onchange="loadPatientProfile()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200">
+            <option value="PAT_101">PAT_101 - Arthur Morgan (58M, AFib, on Coumadin)</option>
+            <option value="PAT_102">PAT_102 - Elena Fisher (44F, T2D, on Glucophage)</option>
+            <option value="PAT_103">PAT_103 - Marcus Vance (67M, CAD, Aspirin Allergy)</option>
+          </select>
+          <div id="patient-card" class="mt-3 p-3 bg-slate-950 rounded-lg text-xs space-y-1.5 border border-slate-850">
+            <div class="text-slate-400">Loading patient details...</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow">
+          <h3 class="text-sm font-semibold text-rose-400 mb-1">Prescription Safety Evaluator</h3>
+          <p class="text-xs text-slate-400 mb-3">Evaluates 2+ hop allergy conflicts and adverse drug interactions.</p>
+          <div class="flex gap-2 mb-3">
+            <select id="candidate-drug" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+              <option value="DRUG_ASP">Aspirin Cardio (Tablet 81mg)</option>
+              <option value="DRUG_ADV">Advil (Ibuprofen 200mg)</option>
+              <option value="DRUG_AMX">Amoxil (Amoxicillin 500mg)</option>
+              <option value="DRUG_ZTH">Zithromax (Azithromycin 250mg)</option>
+              <option value="DRUG_PLV">Plavix (Clopidogrel 75mg)</option>
+            </select>
+            <button onclick="evaluatePrescriptionSafety()" class="bg-rose-600 hover:bg-rose-500 px-4 py-2 text-xs font-semibold rounded-lg shadow">
+              Evaluate
+            </button>
+          </div>
+          <div id="safety-output" class="text-xs"></div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow">
+          <h3 class="text-sm font-semibold text-emerald-400 mb-1">Safe Alternative Pathfinder</h3>
+          <p class="text-xs text-slate-400 mb-3">Finds conflict-free drugs for a target diagnosis.</p>
+          <div class="flex gap-2 mb-3">
+            <input id="target-disease-input" type="text" value="Pneumonia" placeholder="e.g. Pneumonia, CAD" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
+            <button onclick="findSafeAlternatives()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-semibold rounded-lg shadow">
+              Find Safe
+            </button>
+          </div>
+          <div id="alternatives-output" class="text-xs space-y-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let network = null;
+
+    async function loadGraph() {
+      const res = await fetch('/api/graph-data');
+      const data = await res.json();
+      const container = document.getElementById('graph-network');
+      const networkData = {
+        nodes: new vis.DataSet(data.nodes.map(n => ({
+          id: n.id,
+          label: n.label,
+          group: n.group,
+          font: { color: '#ffffff', size: 12 }
+        }))),
+        edges: new vis.DataSet(data.edges.map(e => ({
+          from: e.from,
+          to: e.to,
+          label: e.label,
+          arrows: 'to',
+          font: { align: 'middle', size: 9, color: '#94a3b8' }
+        })))
+      };
+
+      const options = {
+        groups: {
+          Patient: { color: { background: '#0284c7' } },
+          Drug: { color: { background: '#10b981' } },
+          Disease: { color: { background: '#f43f5e' } },
+          ActiveIngredient: { color: { background: '#f59e0b' } },
+          Symptom: { color: { background: '#8b5cf6' } }
+        },
+        physics: { stabilization: true, barnesHut: { springLength: 120 } }
+      };
+
+      network = new vis.Network(container, networkData, options);
+    }
+
+    async function loadPatientProfile() {
+      const patientId = document.getElementById('patient-select').value;
+      const card = document.getElementById('patient-card');
+      card.innerHTML = '<span class="text-slate-500">Loading profile...</span>';
+      const res = await fetch(`/api/patient/${patientId}`);
+      const data = await res.json();
+      const p = data.patient;
+
+      card.innerHTML = `
+        <div><strong class="text-slate-200">${p.name}</strong> (${p.age} y/o, ${p.gender})</div>
+        <div><span class="text-rose-400 font-medium">Diagnoses:</span> ${p.diagnoses.join(', ') || 'None'}</div>
+        <div><span class="text-emerald-400 font-medium">Current Regimen:</span> ${p.current_drugs.join(', ') || 'None'}</div>
+        <div><span class="text-amber-400 font-medium">Allergies:</span> ${p.allergies.join(', ') || 'No recorded allergies'}</div>
+      `;
+    }
+
+    async function evaluatePrescriptionSafety() {
+      const patientId = document.getElementById('patient-select').value;
+      const drugId = document.getElementById('candidate-drug').value;
+      const out = document.getElementById('safety-output');
+      out.innerHTML = '<span class="text-slate-500">Checking interaction paths...</span>';
+      const res = await fetch(`/api/safety-check?patient_id=${patientId}&drug_id=${drugId}`);
+      const data = await res.json();
+      const ev = data.evaluation;
+
+      let html = '';
+      const hasAllergy = ev.allergy_conflicts && ev.allergy_conflicts.length > 0;
+      const hasInteraction = ev.interaction_conflicts && ev.interaction_conflicts.length > 0;
+
+      if (!hasAllergy && !hasInteraction) {
+        html = `<div class="p-2.5 bg-emerald-950/60 border border-emerald-800 text-emerald-300 rounded-lg">
+          [SAFE] No allergy conflicts or adverse drug interactions detected for <strong>${ev.target_drug_name}</strong>.
+        </div>`;
+      } else {
+        html = `<div class="p-2.5 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-lg space-y-1">
+          <div class="font-bold">[WARNING] High Risk Prescribing ${ev.target_drug_name}:</div>`;
+        if (hasAllergy) {
+          html += `<div>• <strong>Allergy Conflict:</strong> Contains ${ev.allergy_conflicts.join(', ')}</div>`;
+        }
+        if (hasInteraction) {
+          ev.interaction_conflicts.forEach(i => {
+            html += `<div>• <strong>Adverse Interaction:</strong> Conflicts with ${i.existing_drug} (${i.severity}: ${i.effect})</div>`;
+          });
+        }
+        html += `</div>`;
+      }
+      out.innerHTML = html;
+    }
+
+    async function findSafeAlternatives() {
+      const patientId = document.getElementById('patient-select').value;
+      const disease = document.getElementById('target-disease-input').value;
+      const out = document.getElementById('alternatives-output');
+      out.innerHTML = '<span class="text-slate-500">Traversing graph for conflict-free paths...</span>';
+      const res = await fetch(`/api/safe-alternatives?patient_id=${patientId}&disease=${encodeURIComponent(disease)}`);
+      const data = await res.json();
+
+      if (!data.safe_drugs || data.safe_drugs.length === 0) {
+        out.innerHTML = `<div class="p-2 bg-slate-950 border border-slate-800 text-amber-300 rounded-lg">
+          No alternative drugs found without contraindications for this patient.
+        </div>`;
+        return;
+      }
+
+      out.innerHTML = data.safe_drugs.map(d => `
+        <div class="p-2 bg-slate-950 border border-emerald-900/60 rounded-lg flex justify-between items-center">
+          <div>
+            <div class="font-semibold text-emerald-400">${d.safe_drug_name}</div>
+            <div class="text-slate-400 text-[11px]">Treats: ${d.disease_treated} (${d.dosage})</div>
+          </div>
+          <span class="text-emerald-400 text-[10px] bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">Clear</span>
+        </div>
+      `).join('');
+    }
+
+    async function triggerReseed() {
+      await fetch('/api/reseed', { method: 'POST' });
+      loadGraph();
+      loadPatientProfile();
+      alert('Medical Knowledge Graph reseeded successfully.');
+    }
+
+    window.onload = () => {
+      loadGraph();
+      loadPatientProfile();
+    };
+  </script>
+</body>
+</html>
